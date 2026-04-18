@@ -3,12 +3,12 @@
   "type": "library",
   "description": "State-based database migration engine for PHP with full ORM support",
   "keywords": ["migration", "database", "orm", "schema", "mysql", "postgresql", "sqlite"],
-  "homepage": "https://github.com/asadraza-69/nudelsalat",
+  "homepage": "https://asadraza-69.github.io/nudelsalat_doc/",
+  "docs": "https://asadraza-69.github.io/nudelsalat_doc/",
   "license": "Apache-2.0",
   "authors": [
     {
-      "name": "Asad Raza",
-      "email": "ar@logisticus.hamburg"
+      "name": "Asad Raza"
     }
   ],
   "autoload": {
@@ -20,12 +20,8 @@
   "require": {
     "php": ">=8.1"
   },
-  "minimum-stability": "dev",
+  "minimum-stability": "stable",
   "prefer-stable": true,
-  "bin": ["nudelsalat"],
-  "extra": {
-    "branch-alias": {
-      "dev-main": "1.0.x-dev"
-    }
-  }
+  "version": "1.0.0",
+  "bin": ["nudelsalat"]
 }
