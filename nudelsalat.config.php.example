@@ -1,0 +1,41 @@
+<?php
+/**
+ * Nudelsalat Migration Library - Example Configuration
+ * 
+ * This file serves as a template for your project's beef.config.php.
+ * Paths are relative to this config file's location.
+ * 
+ * Copy this file to beef.config.php in your project root and customize.
+ */
+
+return [
+    // Database Connections (uses first as default)
+    'databases' => [
+        'default' => [
+            'dsn'  => getenv('BEEF_DB_DSN') ?: 'pgsql:host=localhost;dbname=my_database',
+            'user' => getenv('BEEF_DB_USER') ?: 'postgres',
+            'pass' => getenv('BEEF_DB_PASS') ?: '',
+        ],
+    ],
+
+    // Default database alias
+    'default_database' => 'default',
+
+    // Discovery Paths (relative to this config file)
+    'apps' => [
+        'app' => [
+            'models'     => 'src/Models',
+            'migrations' => 'database/migrations',
+            'seeders'    => 'database/seeders',
+            'fixtures'   => 'fixtures',
+        ],
+    ],
+
+    // Global Seeder/Fixture directories
+    'seeders_dir' => 'database/seeders',
+    'fixtures_dir' => 'fixtures',
+
+    // Global Options
+    'proxy_models' => false,
+    'managed'      => true,
+];

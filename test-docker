@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+docker compose -f docker-compose.test.yml up -d postgres
+exec docker compose -f docker-compose.test.yml run --rm php-test php tests/run.php "$@"

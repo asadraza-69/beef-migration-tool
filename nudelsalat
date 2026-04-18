@@ -1,0 +1,43 @@
+#!/usr/bin/env php
+<?php
+
+// Find autoload - check vendor first (installed as package), then local (dev)
+if (file_exists(__DIR__ . '/vendor/autoload.php')) {
+    require __DIR__ . '/vendor/autoload.php';
+} elseif (file_exists(__DIR__ . '/autoload.php')) {
+    require __DIR__ . '/autoload.php';
+} else {
+    echo "Error: autoload.php not found. Run 'composer install' first.\n";
+    exit(1);
+}
+
+use Beef\Config;
+use Beef\Bootstrap;
+use Beef\Console\Kernel;
+
+// Find config file in project root (where command is run)
+$configFile = getcwd() . '/beef.config.php';
+
+if (!file_exists($configFile)) {
+    echo "Error: beef.config.php not found in project root.\n";
+    echo "Please create one in your project root:\n";
+    echo "  cp beef/beef.config.php.example beef.config.php\n";
+    exit(1);
+}
+
+try {
+    // 1. Load configuration
+    $config = Config::load($configFile);
+
+    // 2. Bootstrap services
+    $bootstrap = new Bootstrap($config);
+    Bootstrap::setInstance($bootstrap);
+
+    // 3. Run Console Kernel
+    $kernel = new Kernel($bootstrap);
+    $kernel->run($argv);
+
+} catch (\Exception $e) {
+    echo "\033[31mBeef Error: " . $e->getMessage() . "\033[0m\n";
+    exit(1);
+}

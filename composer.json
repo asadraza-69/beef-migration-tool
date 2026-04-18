@@ -1,0 +1,13 @@
+{
+  "name": "nudelsalat/migrations",
+  "type": "library",
+  "autoload": {
+    "files": ["migrations/autoload.php"]
+  },
+  "require": {
+    "php": ">=8.1"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "bin": ["nudelsalat"]
+}
