@@ -21,12 +21,51 @@ class QuerySet
     private ?int $offset = null;
     private array $selectRelated = [];
     private array $prefetchRelated = [];
+    // Hydration flag: hydrate results into Model instances by default
+    private bool $hydrate = true;
 
     public function __construct(Model|string $model, \PDO $pdo, array $conditions = [])
     {
         $this->model = $model;
         $this->pdo = $pdo;
         $this->conditions = $conditions;
+    }
+
+    /** Enable or disable hydration of results into Model instances. */
+    public function hydrate(bool $flag): self
+    {
+        $this->hydrate = $flag;
+        return $this;
+    }
+
+    /**
+     * Alias: Django-style order_by (wrapper around existing orderBy).
+     * This keeps a familiar API while preserving existing behavior.
+     */
+    public function order_by(string $field): self
+    {
+        return $this->orderBy($field);
+    }
+
+    /**
+     * Get results as plain arrays (values of each model) instead of hydrated models.
+     *
+     * @return array
+     */
+    public function values(): array
+    {
+        $rows = $this->execute();
+        $out = [];
+        foreach ($rows as $row) {
+            if ($row instanceof \Nudelsalat\ORM\Model) {
+                $out[] = $row->toArray();
+            } elseif (is_array($row)) {
+                $out[] = $row;
+            } else {
+                $out[] = ['value' => $row];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -144,6 +183,27 @@ class QuerySet
             $results = array_slice($results, 0, $this->limit);
         }
         
+        // Hydration step: convert rows to Model instances when required
+        if ($this->hydrate) {
+            $hydrated = [];
+            $cls = is_string($this->model) ? $this->model : (is_object($this->model) ? get_class($this->model) : null);
+            foreach ($results as $row) {
+                if ($row instanceof \Nudelsalat\ORM\Model) {
+                    $hydrated[] = $row;
+                    continue;
+                }
+                if (is_null($cls)) {
+                    $hydrated[] = $row;
+                    continue;
+                }
+                $obj = new $cls();
+                foreach ($row as $k => $v) {
+                    $obj->$k = $v;
+                }
+                $hydrated[] = $obj;
+            }
+            $results = $hydrated;
+        }
         return $results;
     }
 
@@ -233,7 +293,7 @@ class QuerySet
      * 
      * @return array|null
      */
-    public function first(): ?array
+    public function first(): ?Model
     {
         $results = $this->limit(1)->execute();
         return $results[0] ?? null;
@@ -275,8 +335,8 @@ class QuerySet
         $desc = str_starts_with($this->orderBy, '-');
 
         usort($results, function ($a, $b) use ($field, $desc) {
-            $aVal = $a[$field] ?? null;
-            $bVal = $b[$field] ?? null;
+            $aVal = is_array($a) ? ($a[$field] ?? null) : (is_object($a) ? ($a->$field ?? null) : null);
+            $bVal = is_array($b) ? ($b[$field] ?? null) : (is_object($b) ? ($b->$field ?? null) : null);
 
             if ($aVal === $bVal) {
                 return 0;
@@ -297,5 +357,25 @@ class QuerySet
     public function all(): array
     {
         return $this->execute();
+    }
+
+    /**
+     * Pluck a single column value from hydrated results.
+     *
+     * @param string $column
+     * @return array
+     */
+    public function pluck(string $column): array
+    {
+        $results = $this->execute();
+        $values = [];
+        foreach ($results as $row) {
+            if (is_array($row)) {
+                $values[] = $row[$column] ?? null;
+            } elseif (is_object($row)) {
+                $values[] = $row->$column ?? null;
+            }
+        }
+        return array_values(array_filter($values, function ($v) { return $v !== null; }));
     }
 }
