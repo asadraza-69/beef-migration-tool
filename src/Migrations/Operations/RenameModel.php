@@ -31,9 +31,12 @@ class RenameModel extends Operation
         $oldDbName = $oldTable?->options['db_table'] ?? $this->oldName;
         $newDbName = $newTable?->options['db_table'] ?? $this->newName;
         
-        if ($oldDbName !== $newDbName) {
-            $schemaEditor->renameTable($oldDbName, $newDbName);
+        // Skip if no actual table rename needed
+        if ($oldDbName === $newDbName) {
+            return;
         }
+        
+        $schemaEditor->renameTable($oldDbName, $newDbName);
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
@@ -44,9 +47,12 @@ class RenameModel extends Operation
         $newDbName = $newTable?->options['db_table'] ?? $this->newName;
         $oldDbName = $oldTable?->options['db_table'] ?? $this->oldName;
         
-        if ($oldDbName !== $newDbName) {
-            $schemaEditor->renameTable($newDbName, $oldDbName);
+        // Skip if no actual table rename needed
+        if ($newDbName === $oldDbName) {
+            return;
         }
+        
+        $schemaEditor->renameTable($newDbName, $oldDbName);
     }
 
     public function describe(): string
