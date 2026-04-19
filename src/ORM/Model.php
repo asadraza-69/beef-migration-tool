@@ -149,7 +149,7 @@ abstract class Model
     /**
      * Hydrate a model instance from a row array.
      */
-    protected static function hydrate(array $row): static
+    public static function hydrate(array $row): static
     {
         $obj = new static();
         foreach ($row as $k => $v) {
@@ -160,37 +160,17 @@ abstract class Model
 
     public static function all(): array
     {
-        $rows = static::getObjectManager()->all();
-        $results = [];
-
-        foreach ($rows as $row) {
-            $results[] = static::hydrate($row);
-        }
-
-        return $results;
+        return static::getObjectManager()->all();
     }
 
     public static function get(int|string $pk): ?Model
     {
-        $row = static::getObjectManager()->get($pk);
-
-        if (!$row) {
-            return null;
-        }
-
-        return static::hydrate($row);
+        return static::getObjectManager()->get($pk);
     }
 
     public static function filter(array $conditions): array
     {
-        $rows = static::getObjectManager()->filter($conditions);
-        $results = [];
-
-        foreach ($rows as $row) {
-            $results[] = static::hydrate($row);
-        }
-
-        return $results;
+        return static::getObjectManager()->filter($conditions);
     }
 
     public static function where(array $conditions): array
@@ -198,7 +178,7 @@ abstract class Model
         return static::filter($conditions);
     }
 
-    public static function first(array $conditions = []): ?Model
+    public static function first(?array $conditions = null): ?Model
     {
         return static::getObjectManager()->first($conditions);
     }
@@ -675,7 +655,7 @@ class Manager
         $result = $this->get((int) $pdo->lastInsertId());
         Signal::send('post_save', [$this->model, $result, false]);
 
-        return $result ?? [];
+        return $result;
     }
 
     public function update(array $data, array $conditions): int
