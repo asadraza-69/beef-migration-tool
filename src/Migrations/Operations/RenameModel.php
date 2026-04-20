@@ -19,6 +19,14 @@ class RenameModel extends Operation
         if ($table) {
             $state->removeTable($this->oldName);
             $table->name = $this->newName;
+
+            // Keep the db_table option aligned when it simply mirrors the model key.
+            // This avoids self-renames like RENAME TABLE post -> post when db_table
+            // is redundantly stored as the table name (common in current Inspector output).
+            if (($table->options['db_table'] ?? null) === $this->oldName) {
+                $table->options['db_table'] = $this->newName;
+            }
+
             $state->addTable($table);
         }
     }
@@ -30,17 +38,29 @@ class RenameModel extends Operation
         
         $oldDbName = $oldTable?->options['db_table'] ?? $this->oldName;
         $newDbName = $newTable?->options['db_table'] ?? $this->newName;
+
+        // Django parity: if the underlying db_table is unchanged (e.g. explicit db_table),
+        // a RenameModel should not try to rename the database table.
+        if ($oldDbName === $newDbName) {
+            return;
+        }
         
         $schemaEditor->renameTable($oldDbName, $newDbName);
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $newTable = $fromState->getTable($this->newName);
-        $oldTable = $toState->getTable($this->oldName);
+        // Convention in this codebase: during unapply, databaseBackwards receives
+        // (fromState = state before operation, toState = state after operation).
+        $oldTable = $fromState->getTable($this->oldName);
+        $newTable = $toState->getTable($this->newName);
         
-        $newDbName = $newTable?->options['db_table'] ?? $this->newName;
         $oldDbName = $oldTable?->options['db_table'] ?? $this->oldName;
+        $newDbName = $newTable?->options['db_table'] ?? $this->newName;
+
+        if ($newDbName === $oldDbName) {
+            return;
+        }
         
         $schemaEditor->renameTable($newDbName, $oldDbName);
     }

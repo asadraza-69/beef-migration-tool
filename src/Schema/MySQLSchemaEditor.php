@@ -4,7 +4,61 @@ namespace Nudelsalat\Schema;
 
 class MySQLSchemaEditor extends SchemaEditor
 {
-    public function createTable(Table $table): void
+    public function tableExists(string $tableName): bool
+    {
+        if ($this->tableCache === null) {
+            $this->tableCache = [];
+            $stmt = $this->pdo->query("SHOW TABLES");
+            while ($row = $stmt->fetch(\PDO::FETCH_NUM)) {
+                $this->tableCache[$row[0]] = true;
+            }
+        }
+        return isset($this->tableCache[$tableName]);
+    }
+
+    public function columnExists(string $tableName, string $columnName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+            $stmt->execute([$tableName, $columnName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return false;
+        }
+    }
+
+    public function indexExists(string $tableName, string $indexName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
+            $stmt->execute([$tableName, $indexName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return false;
+        }
+    }
+
+    public function foreignKeyExists(string $tableName, string $constraintName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'");
+            $stmt->execute([$tableName, $constraintName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return false;
+        }
+    }
+
+    public function createTable(Table $table, ?string $dbName = null): void
     {
         $columnDefs = [];
         foreach ($table->getColumns() as $column) {
@@ -13,7 +67,7 @@ class MySQLSchemaEditor extends SchemaEditor
 
         $sql = sprintf(
             "CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-            $table->name,
+            $dbName ?? $table->name,
             implode(', ', $columnDefs)
         );
 
@@ -22,14 +76,24 @@ class MySQLSchemaEditor extends SchemaEditor
 
     public function deleteTable(string $name): void
     {
-        $sql = sprintf("DROP TABLE `%s`", $name);
-        $this->execute($sql);
+        if ($this->tableExists($name)) {
+            $sql = sprintf("DROP TABLE `%s`", $name);
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function renameTable(string $oldName, string $newName): void
     {
-        $sql = sprintf("RENAME TABLE `%s` TO `%s`", $oldName, $newName);
-        $this->execute($sql);
+        if ($oldName === $newName) {
+            return;
+        }
+
+        if ($this->tableExists($oldName)) {
+            $sql = sprintf("RENAME TABLE `%s` TO `%s`", $oldName, $newName);
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function addColumn(string $tableName, Column $column): void
@@ -117,13 +181,13 @@ class MySQLSchemaEditor extends SchemaEditor
         $this->execute($sql);
     }
 
-    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete): void
+    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete, ?string $fkName = null): void
     {
-        $fkName = "fk_{$tableName}_{$columnName}";
+        $constraintName = $fkName ?? "fk_{$tableName}_{$columnName}";
         $sql = sprintf(
             "ALTER TABLE `%s` ADD CONSTRAINT `%s` FOREIGN KEY (`%s`) REFERENCES `%s` (`%s`) ON DELETE %s",
             $tableName,
-            $fkName,
+            $constraintName,
             $columnName,
             $toTable,
             $toColumn,

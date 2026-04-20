@@ -23,14 +23,20 @@ class RemoveField extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeColumn($this->modelName, $this->name);
+        if ($schemaEditor->tableExists($this->modelName) && $schemaEditor->columnExists($this->modelName, $this->name)) {
+            $schemaEditor->removeColumn($this->modelName, $this->name);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $oldTable = $fromState->getTable($this->modelName);
-        $column = $oldTable->getColumn($this->name);
-        $schemaEditor->addColumn($this->modelName, $column);
+        if ($schemaEditor->tableExists($this->modelName) && !$schemaEditor->columnExists($this->modelName, $this->name)) {
+            $oldTable = $fromState->getTable($this->modelName);
+            $column = $oldTable->getColumn($this->name);
+            if ($column) {
+                $schemaEditor->addColumn($this->modelName, $column);
+            }
+        }
     }
 
     public function describe(): string

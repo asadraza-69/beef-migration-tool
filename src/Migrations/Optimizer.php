@@ -38,10 +38,10 @@ class Optimizer
      * @param Operation[] $operations
      * @return Operation[]
      */
-    public function optimize(array $operations): array
+public function optimize(array $operations): array
     {
         $result = $operations;
-        
+
         for ($pass = 0; $pass < self::MAX_PASSES; $pass++) {
             $newResult = $this->optimizeInner($result);
             
@@ -66,13 +66,24 @@ class Optimizer
     {
         $result = [];
         $count = count($operations);
+        $skipped = [];
         
         for ($i = 0; $i < $count; $i++) {
+            // Skip indices that were consumed by reductions
+            if (isset($skipped[$i])) {
+                continue;
+            }
+            
             $op = $operations[$i];
             $reduced = false;
             
             // Try to reduce with subsequent operations
             for ($j = $i + 1; $j < $count; $j++) {
+                // Skip indices that were already consumed
+                if (isset($skipped[$j])) {
+                    continue;
+                }
+                
                 $nextOp = $operations[$j];
                 
                 // Check if we can reduce
@@ -81,7 +92,7 @@ class Optimizer
                 if ($reduction !== null) {
                     if ($reduction === []) {
                         // Operations cancel out - skip both
-                        $i = $j;
+                        $skipped[$j] = true;
                         $reduced = true;
                         break;
                     }
@@ -90,15 +101,19 @@ class Optimizer
                         // Replace current op with reduced version
                         $op = $reduction[0] ?? $op;
                         
-                        // If there are more operations to add, insert them
-                        if (count($reduction) > 1) {
-                            // Mark that we've consumed up to j
-                            $i = $j;
-                            $reduced = true;
-                            break;
+                        // Mark j as skipped if we consumed it
+                        if (count($reduction) <= 1) {
+                            $skipped[$j] = true;
                         }
                         
-                        $i = $j;
+                        // If there are more operations to add, mark them too
+                        if (count($reduction) > 1) {
+                            // Mark all consumed indices
+                            for ($k = $i + 1; $k <= $j; $k++) {
+                                $skipped[$k] = true;
+                            }
+                        }
+                        
                         $reduced = true;
                         break;
                     }
@@ -133,6 +148,9 @@ class Optimizer
      */
     private function reduce(Operation $op, Operation $nextOp, array $allOps, int $currentIndex, int $nextIndex): array|bool|null
     {
+        $opName = get_class($op);
+        $nextOpName = get_class($nextOp);
+        
         // Use the operation's reduce method if available
         if (method_exists($op, 'reduce')) {
             $result = $op->reduce($nextOp, 'default');
@@ -149,20 +167,20 @@ class Optimizer
                 return []; // Cancel both
             }
         }
-        
+
+        // DeleteModel + CreateModel = DeleteModel (final state wins)
+        if ($op instanceof DeleteModel && $nextOp instanceof CreateModel) {
+            if ($this->sameModel($op, $nextOp)) {
+                return [$nextOp]; // Keep the CreateModel (which becomes delete in reverse)
+            }
+        }
+
         // CreateModel + RenameModel = CreateModel with new name
         if ($op instanceof CreateModel && $nextOp instanceof RenameModel) {
             if ($op->name === $nextOp->oldName) {
                 $clone = clone $op;
                 $clone->name = $nextOp->newName;
                 return [$clone];
-            }
-        }
-        
-        // DeleteModel + CreateModel = DeleteModel (final state wins)
-        if ($op instanceof DeleteModel && $nextOp instanceof CreateModel) {
-            if ($this->sameModel($op, $nextOp)) {
-                return [$nextOp]; // Keep the CreateModel (which becomes delete in reverse)
             }
         }
         

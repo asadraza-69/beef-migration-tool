@@ -34,19 +34,21 @@ class Introspector
             $tableNames = $stmt->fetchAll(\PDO::FETCH_COLUMN);
         } elseif ($driver === 'pgsql') {
             $schemaFilter = $this->schemaFilter ?? 'public';
-            $stmt = $this->pdo->prepare("SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname = :schema AND schemaname NOT IN ('pg_catalog', 'information_schema')");
-            $stmt->execute(['schema' => $schemaFilter]);
-            $tableNames = array_map(
-                static fn(array $row): string => $row['schemaname'] . '.' . $row['tablename'],
-                $stmt->fetchAll(\PDO::FETCH_ASSOC)
-            );
+            try {
+                $stmt = $this->pdo->prepare("SELECT table_name FROM information_schema.tables WHERE table_schema = :schema");
+                $stmt->execute(['schema' => $schemaFilter]);
+                $tableNames = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+            } catch (\PDOException $e) {
+                $tableNames = [];
+            }
             
             if (empty($tableNames) && $schemaFilter === 'public') {
-                $stmt = $this->pdo->query("SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema')");
-                $tableNames = array_map(
-                    static fn(array $row): string => $row['schemaname'] . '.' . $row['tablename'],
-                    $stmt->fetchAll(\PDO::FETCH_ASSOC)
-                );
+                try {
+                    $stmt = $this->pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')");
+                    $tableNames = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+                } catch (\PDOException $e) {
+                    $tableNames = [];
+                }
             }
         } else {
             // MySQL - no schema filtering needed

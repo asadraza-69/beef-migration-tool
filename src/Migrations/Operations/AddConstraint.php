@@ -24,12 +24,16 @@ class AddConstraint extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->addConstraint($this->modelName, $this->constraint);
+        if ($schemaEditor->tableExists($this->modelName)) {
+            $schemaEditor->addConstraint($this->modelName, $this->constraint);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeConstraint($this->modelName, $this->constraint->name);
+        if ($schemaEditor->tableExists($this->modelName)) {
+            $schemaEditor->removeConstraint($this->modelName, $this->constraint->name);
+        }
     }
 
     public function describe(): string

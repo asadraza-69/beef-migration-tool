@@ -11,12 +11,14 @@ use Nudelsalat\Migrations\StateRegistry;
  *
  * This operation changes the db_table option for a model, which affects
  * the underlying database table name that the model uses.
+ * 
+ * Django-compatible: follows AlterModelTable operation semantics.
  */
 class AlterModelTable extends Operation
 {
     /**
-     * @param string $name The model name (table name) to alter
-     * @param string|null $table The new table name, or null to remove custom table name
+     * @param string $name The model name to alter
+     * @param string|null $table The new db_table value, or null to remove custom table name
      */
     public function __construct(
         public string $name,
@@ -25,8 +27,6 @@ class AlterModelTable extends Operation
 
     /**
      * Mutate the project state to reflect the table name change.
-     *
-     * @param ProjectState $state The current project state
      */
     public function stateForwards(ProjectState $state): void
     {
@@ -44,58 +44,43 @@ class AlterModelTable extends Operation
 
     /**
      * Apply the table rename to the database.
-     *
-     * @param SchemaEditor $schemaEditor The schema editor for the current database
-     * @param ProjectState $fromState The state before this operation
-     * @param ProjectState $toState The state after this operation
-     * @param StateRegistry $registry The state registry for model lookups
+     * Uses fromState to get old db_table and toState to get new db_table.
      */
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $oldTable = $fromState->getTable($this->name);
+        // Get the table from toState (after the change) to get both old and new db_table
         $newTable = $toState->getTable($this->name);
+        if (!$newTable) return;
+        
+        // Old db_table from fromState
+        $oldTable = $fromState->getTable($this->name);
+        $oldDbTable = $oldTable?->options['db_table'] ?? $this->name;
+        $newDbTable = $newTable->options['db_table'] ?? $this->name;
 
-        if ($oldTable && $newTable) {
-            $oldName = $oldTable->options['db_table'] ?? $this->name;
-            $newName = $newTable->options['db_table'] ?? $this->name;
-
-            if ($oldName !== $newName) {
-                $schemaEditor->renameTable($oldName, $newName);
-            }
+        if ($oldDbTable !== $newDbTable) {
+            $schemaEditor->renameTable($oldDbTable, $newDbTable);
         }
     }
 
     /**
      * Reverse the table rename in the database.
-     *
-     * @param SchemaEditor $schemaEditor The schema editor for the current database
-     * @param ProjectState $fromState The state before this operation (forward state)
-     * @param ProjectState $toState The state after this operation (backward state)
-     * @param StateRegistry $registry The state registry for model lookups
      */
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        // On rollback, get table from fromState (current state after forward)
-        $table = $fromState->getTable($this->name);
-        
-        if ($table) {
-            // Get: table was renamed TO this name during forward
-            $fromDbName = $table->options['db_table'] ?? $this->name;
-            // Get: table was named BEFORE forward (the original name)
-            $toDbName = $this->name; // Use model name as fallback
-            
-            // If we can find the old state, get original table name
-            if ($toState) {
-                $oldTable = $toState->getTable($this->name);
-                if ($oldTable) {
-                    $toDbName = $oldTable->options['db_table'] ?? $this->name;
-                }
-            }
-            
-            // Skip if no actual table rename needed
-            if ($fromDbName !== $toDbName) {
-                $schemaEditor->renameTable($fromDbName, $toDbName);
-            }
+        // Convention in this codebase: during unapply, databaseBackwards receives
+        // (fromState = state before operation, toState = state after operation).
+        $oldTable = $fromState->getTable($this->name);
+        $newTable = $toState->getTable($this->name);
+
+        if (!$oldTable || !$newTable) {
+            return;
+        }
+
+        $oldDbTable = $oldTable->options['db_table'] ?? $this->name;
+        $newDbTable = $newTable->options['db_table'] ?? $this->name;
+
+        if ($oldDbTable !== $newDbTable) {
+            $schemaEditor->renameTable($newDbTable, $oldDbTable);
         }
     }
 

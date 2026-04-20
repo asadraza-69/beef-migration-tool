@@ -5,6 +5,84 @@ namespace Nudelsalat\Schema;
 abstract class SchemaEditor
 {
     protected \PDO $pdo;
+    protected ?array $tableCache = null;
+
+    public function tableExists(string $tableName): bool
+    {
+        if ($this->tableCache === null) {
+            $this->tableCache = [];
+            try {
+                $stmt = $this->pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+                while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                    $this->tableCache[$row['name']] = true;
+                }
+            } catch (\PDOException $e) {
+                // Query failed - likely not SQLite, leave cache empty
+                $this->tableCache = [];
+            }
+        }
+        return isset($this->tableCache[$tableName]);
+    }
+
+    public function clearTableCache(): void
+    {
+        $this->tableCache = null;
+    }
+
+    public function columnExists(string $tableName, string $columnName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->query("PRAGMA table_info(\"{$tableName}\")");
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                if ($row['name'] === $columnName) {
+                    return true;
+                }
+            }
+        } catch (\PDOException $e) {
+            // Not SQLite - fail safe
+        }
+        return false;
+    }
+
+    public function indexExists(string $tableName, string $indexName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->query("PRAGMA index_list(\"{$tableName}\")");
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                if ($row['name'] === $indexName) {
+                    return true;
+                }
+            }
+        } catch (\PDOException $e) {
+            // Not SQLite - fail safe
+        }
+        return false;
+    }
+
+    public function foreignKeyExists(string $tableName, string $constraintName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->query("PRAGMA foreign_key_list(\"{$tableName}\")");
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                if ($row['id'] === $constraintName || "fk_{$tableName}_{$row['from']}" === $constraintName) {
+                    return true;
+                }
+            }
+        } catch (\PDOException $e) {
+            // Not SQLite - fail safe
+        }
+        return false;
+    }
+
     /** @var string[] */
     public array $deferredSql = [];
     private bool $dryRun = false;
@@ -21,7 +99,7 @@ abstract class SchemaEditor
         $this->pdo = $pdo;
     }
 
-    abstract public function createTable(Table $table): void;
+    abstract public function createTable(Table $table, ?string $dbName = null): void;
     abstract public function deleteTable(string $name): void;
     abstract public function renameTable(string $oldName, string $newName): void;
     abstract public function addColumn(string $tableName, Column $column): void;
@@ -35,7 +113,7 @@ abstract class SchemaEditor
     abstract public function addConstraint(string $tableName, Constraint $constraint): void;
     abstract public function removeConstraint(string $tableName, string $constraintName): void;
 
-    abstract public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete): void;
+    abstract public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete, ?string $fkName = null): void;
     abstract public function removeForeignKey(string $tableName, string $constraintName): void;
 
     /**

@@ -389,6 +389,42 @@ class Executor
         return $state;
     }
 
+    /**
+     * Build the project state as defined by migrations on disk (heads/leaves),
+     * regardless of whether they have been applied to the current database.
+     *
+     * This matches Django's makemigrations behavior: detect changes against the
+     * latest migration state, not against the database's applied history.
+     */
+    public function projectStateAtDisk(): ProjectState
+    {
+        $state = new ProjectState();
+        $graph = $this->loader->getGraph();
+        $graph->validate();
+
+        $applied = $this->recorder->getAppliedMigrations();
+        $this->loader->ensureConsistentHistory($applied);
+
+        // Use the active graph (replacement-aware) but include both applied and unapplied
+        // migrations on disk to reflect the latest state.
+        $plan = [];
+        foreach ($this->loader->getActiveLeafNodes($applied) as $leaf) {
+            foreach ($this->buildForwardsPlan($leaf, $applied) as $name) {
+                if (!isset($plan[$name])) {
+                    $plan[$name] = true;
+                }
+            }
+        }
+
+        foreach (array_keys($plan) as $name) {
+            if (isset($graph->nodes[$name]) && $this->shouldRunMigration($graph->nodes[$name])) {
+                $graph->nodes[$name]->mutateState($state);
+            }
+        }
+
+        return $state;
+    }
+
     public function unmigrate(string $target, bool $fake = false): void
     {
         $graph = $this->loader->getGraph();

@@ -42,7 +42,7 @@ class MakeCommand extends BaseCommand
         
         // Get previous state from migrations
         $this->info("Calculating previous state from migrations...");
-        $previousState = $executor->projectStateAtApplied();
+        $previousState = $executor->projectStateAtDisk();
         
         $this->info("Detecting changes from database...");
         $questioner = new Questioner();
@@ -72,6 +72,7 @@ class MakeCommand extends BaseCommand
 
         $apps = $config->getApps();
         $groupedChanges = $this->groupChangesByApp($changes, $currentState, $previousState, $apps);
+
         $timestamp = 'm' . time();
 
         foreach ($groupedChanges as $appName => $appChanges) {
@@ -79,7 +80,7 @@ class MakeCommand extends BaseCommand
             $graph = $loader->getGraph();
             $sameAppDependencies = $this->buildDependencies($graph, $appName);
             $dependencies = array_values(array_unique($sameAppDependencies));
-            
+
             $writer = new MigrationWriter(
                 $appChanges,
                 $dependencies,
@@ -197,13 +198,13 @@ class MakeCommand extends BaseCommand
         $currentState = $inspector->inspect($modelDirs);
 
         $this->info("Calculating previous state...");
-        $previousState = $executor->projectStateAtApplied();
+        $previousState = $executor->projectStateAtDisk();
 
         $this->info("Detecting changes...");
         $questioner = new Questioner();
         $autodetector = new Autodetector($previousState, $currentState, $questioner);
         $changes = $autodetector->detectChanges();
-
+        
         if (empty($changes)) {
             $this->info("No changes detected.");
             return;

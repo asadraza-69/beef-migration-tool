@@ -23,14 +23,20 @@ class RemoveIndex extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeIndex($this->modelName, $this->name);
+        if ($schemaEditor->tableExists($this->modelName) && $schemaEditor->indexExists($this->modelName, $this->name)) {
+            $schemaEditor->removeIndex($this->modelName, $this->name);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $oldTable = $fromState->getTable($this->modelName);
-        $index = $oldTable->getIndexes()[$this->name];
-        $schemaEditor->addIndex($this->modelName, $index);
+        if ($schemaEditor->tableExists($this->modelName) && !$schemaEditor->indexExists($this->modelName, $this->name)) {
+            $oldTable = $fromState->getTable($this->modelName);
+            $index = $oldTable->getIndexes()[$this->name] ?? null;
+            if ($index) {
+                $schemaEditor->addIndex($this->modelName, $index);
+            }
+        }
     }
 
     public function describe(): string

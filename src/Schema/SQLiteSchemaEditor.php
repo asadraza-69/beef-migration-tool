@@ -4,7 +4,7 @@ namespace Nudelsalat\Schema;
 
 class SQLiteSchemaEditor extends SchemaEditor
 {
-    public function createTable(Table $table): void
+    public function createTable(Table $table, ?string $dbName = null): void
     {
         $columnDefs = [];
         foreach ($table->getColumns() as $column) {
@@ -13,7 +13,7 @@ class SQLiteSchemaEditor extends SchemaEditor
 
         $sql = sprintf(
             "CREATE TABLE \"%s\" (%s%s)",
-            $table->name,
+            $dbName ?? $table->name,
             implode(', ', $columnDefs),
             $this->getForeignKeysSql($table)
         );
@@ -42,14 +42,24 @@ class SQLiteSchemaEditor extends SchemaEditor
 
     public function deleteTable(string $name): void
     {
-        $sql = sprintf("DROP TABLE \"%s\"", $name);
-        $this->execute($sql);
+        if ($this->tableExists($name)) {
+            $sql = sprintf("DROP TABLE \"%s\"", $name);
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function renameTable(string $oldName, string $newName): void
     {
-        $sql = sprintf("ALTER TABLE \"%s\" RENAME TO \"%s\"", $oldName, $newName);
-        $this->execute($sql);
+        if ($oldName === $newName) {
+            return;
+        }
+
+        if ($this->tableExists($oldName)) {
+            $sql = sprintf("ALTER TABLE \"%s\" RENAME TO \"%s\"", $oldName, $newName);
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function addColumn(string $tableName, Column $column): void
@@ -122,11 +132,11 @@ class SQLiteSchemaEditor extends SchemaEditor
         });
     }
 
-    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete): void
+    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete, ?string $fkName = null): void
     {
-        $fkName = "fk_{$tableName}_{$columnName}";
-        $this->rebuildTable($tableName, function(Table $table) use ($fkName, $columnName, $toTable, $toColumn, $onDelete) {
-            $table->addForeignKey(new ForeignKeyConstraint($fkName, $columnName, $toTable, $toColumn, $onDelete));
+        $constraintName = $fkName ?? "fk_{$tableName}_{$columnName}";
+        $this->rebuildTable($tableName, function(Table $table) use ($constraintName, $columnName, $toTable, $toColumn, $onDelete) {
+            $table->addForeignKey(new ForeignKeyConstraint($constraintName, $columnName, $toTable, $toColumn, $onDelete));
         });
     }
 

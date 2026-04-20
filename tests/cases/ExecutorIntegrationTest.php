@@ -317,6 +317,146 @@ PHP);
         $this->assertTrue(in_array('email', $columnNames, true));
     }
 
+    public function testPostgresqlRenameModelWithSubsequentAlterModelTable(): void
+    {
+        $dsn = getenv('BEEF_TEST_PGSQL_DSN') ?: '';
+        if ($dsn === '') {
+            $this->markSkipped('BEEF_TEST_PGSQL_DSN not configured.');
+        }
+
+        $project = new TestProject($this->createTemporaryDirectory());
+        $project->writeMigration('0001_initial', <<<'PHP'
+<?php
+use Nudelsalat\Migrations\Migration;
+use Nudelsalat\Migrations\Operations\CreateModel;
+use Nudelsalat\Schema\Column;
+return new class('0001_initial') extends Migration {
+    public function __construct(string $name)
+    {
+        parent::__construct($name);
+        $this->operations = [
+            new CreateModel('post', [
+                new Column('id', 'int', false, null, true, true),
+            ], ['db_table' => 'post']),
+        ];
+    }
+};
+PHP);
+        $project->writeMigration('0002_rename_and_alter_table', <<<'PHP'
+<?php
+use Nudelsalat\Migrations\Migration;
+use Nudelsalat\Migrations\Operations\AlterModelTable;
+use Nudelsalat\Migrations\Operations\RenameModel;
+return new class('0002_rename_and_alter_table') extends Migration {
+    public function __construct(string $name)
+    {
+        parent::__construct($name);
+        $this->dependencies = ['0001_initial'];
+        $this->operations = [
+            // This mirrors the autodetector output when db_table changes are
+            // detected as a "rename" + AlterModelTable pass.
+            new RenameModel('post', 'posts'),
+            new AlterModelTable('posts', 'posts'),
+        ];
+    }
+};
+PHP);
+
+        $bootstrap = $project->createBootstrap([
+            'dsn' => $dsn,
+            'user' => getenv('BEEF_TEST_PGSQL_USER') ?: 'beef',
+            'pass' => getenv('BEEF_TEST_PGSQL_PASS') ?: 'beef',
+        ]);
+
+        $pdo = $bootstrap->getPdo();
+        $pdo->exec('DROP TABLE IF EXISTS "posts" CASCADE');
+        $pdo->exec('DROP TABLE IF EXISTS "post" CASCADE');
+        $pdo->exec('DROP TABLE IF EXISTS "nudelsalat_migrations" CASCADE');
+
+        $executor = $bootstrap->createExecutor();
+        $executor->migrate();
+
+        $stmt = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('post', 'posts')");
+        $tables = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $this->assertTrue(in_array('posts', $tables, true));
+        $this->assertFalse(in_array('post', $tables, true));
+
+        $executor->unmigrate('main.0002_rename_and_alter_table');
+
+        $stmt = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('post', 'posts')");
+        $tables = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $this->assertTrue(in_array('post', $tables, true));
+        $this->assertFalse(in_array('posts', $tables, true));
+    }
+
+    public function testPostgresqlRenameModelRenamesDatabaseTableWhenDbTableMirrorsName(): void
+    {
+        $dsn = getenv('BEEF_TEST_PGSQL_DSN') ?: '';
+        if ($dsn === '') {
+            $this->markSkipped('BEEF_TEST_PGSQL_DSN not configured.');
+        }
+
+        $project = new TestProject($this->createTemporaryDirectory());
+        $project->writeMigration('0001_initial', <<<'PHP'
+<?php
+use Nudelsalat\Migrations\Migration;
+use Nudelsalat\Migrations\Operations\CreateModel;
+use Nudelsalat\Schema\Column;
+return new class('0001_initial') extends Migration {
+    public function __construct(string $name)
+    {
+        parent::__construct($name);
+        $this->operations = [
+            new CreateModel('post', [
+                new Column('id', 'int', false, null, true, true),
+            ], ['db_table' => 'post']),
+        ];
+    }
+};
+PHP);
+        $project->writeMigration('0002_rename_post_to_posts', <<<'PHP'
+<?php
+use Nudelsalat\Migrations\Migration;
+use Nudelsalat\Migrations\Operations\RenameModel;
+return new class('0002_rename_post_to_posts') extends Migration {
+    public function __construct(string $name)
+    {
+        parent::__construct($name);
+        $this->dependencies = ['0001_initial'];
+        $this->operations = [
+            new RenameModel('post', 'posts'),
+        ];
+    }
+};
+PHP);
+
+        $bootstrap = $project->createBootstrap([
+            'dsn' => $dsn,
+            'user' => getenv('BEEF_TEST_PGSQL_USER') ?: 'beef',
+            'pass' => getenv('BEEF_TEST_PGSQL_PASS') ?: 'beef',
+        ]);
+
+        $pdo = $bootstrap->getPdo();
+        $pdo->exec('DROP TABLE IF EXISTS "posts" CASCADE');
+        $pdo->exec('DROP TABLE IF EXISTS "post" CASCADE');
+        $pdo->exec('DROP TABLE IF EXISTS "nudelsalat_migrations" CASCADE');
+
+        $executor = $bootstrap->createExecutor();
+        $executor->migrate();
+
+        $stmt = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('post', 'posts')");
+        $tables = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $this->assertTrue(in_array('posts', $tables, true));
+        $this->assertFalse(in_array('post', $tables, true));
+
+        $executor->unmigrate('main.0002_rename_post_to_posts');
+
+        $stmt = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('post', 'posts')");
+        $tables = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $this->assertTrue(in_array('post', $tables, true));
+        $this->assertFalse(in_array('posts', $tables, true));
+    }
+
     private function writeMigrationChain(TestProject $project, bool $includeReplacement = false): void
     {
         $project->writeMigration('0001_initial', <<<'PHP'

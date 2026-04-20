@@ -240,4 +240,46 @@ PHP);
         $bookMigration = file_get_contents($booksMigrations . '/' . $bookFiles[0]);
         $this->assertContains('authors.', $bookMigration);
     }
+
+    public function testMakeCommandIsIdempotentWithoutApplyingMigrations(): void
+    {
+        $project = new TestProject($this->createTemporaryDirectory());
+
+        $className = 'IdempotentModel' . bin2hex(random_bytes(4));
+        $project->writeModel($className, str_replace(
+            '__CLASS__',
+            $className,
+            <<<'PHP'
+<?php
+namespace MakeIdempotency\Models;
+
+use Nudelsalat\ORM\Model;
+use Nudelsalat\Migrations\Fields\StringField;
+
+class __CLASS__ extends Model
+{
+    public static function fields(): array
+    {
+        return [
+            'name' => new StringField(),
+        ];
+    }
+}
+PHP
+        ));
+
+        $bootstrap = $project->createBootstrap(['dsn' => 'sqlite:' . $project->root . '/make_idem.sqlite']);
+
+        $first = $this->captureOutput(fn() => (new \Nudelsalat\Console\Commands\MakeCommand($bootstrap))->execute([]));
+        $this->assertContains('Created migration:', $first);
+
+        $filesAfterFirst = array_values(array_filter(scandir($project->migrationsDir), static fn(string $file): bool => str_ends_with($file, '.php')));
+        $this->assertCount(1, $filesAfterFirst);
+
+        $second = $this->captureOutput(fn() => (new \Nudelsalat\Console\Commands\MakeCommand($bootstrap))->execute([]));
+        $this->assertContains('No changes detected.', $second);
+
+        $filesAfterSecond = array_values(array_filter(scandir($project->migrationsDir), static fn(string $file): bool => str_ends_with($file, '.php')));
+        $this->assertCount(1, $filesAfterSecond, 'Expected makemigrations to not create duplicate migrations when nothing changed.');
+    }
 }

@@ -24,12 +24,16 @@ class AddIndex extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->addIndex($this->modelName, $this->index);
+        if ($schemaEditor->tableExists($this->modelName) && !$schemaEditor->indexExists($this->modelName, $this->index->name)) {
+            $schemaEditor->addIndex($this->modelName, $this->index);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeIndex($this->modelName, $this->index->name);
+        if ($schemaEditor->tableExists($this->modelName) && $schemaEditor->indexExists($this->modelName, $this->index->name)) {
+            $schemaEditor->removeIndex($this->modelName, $this->index->name);
+        }
     }
 
     public function describe(): string

@@ -60,8 +60,8 @@ class Autodetector
                     if ($this->questioner->askRenameModel($oldName, $newName)) {
                         $operations[] = new RenameModel($oldName, $newName);
                         $renamedModels[$newName] = $oldName;
-                        unset($removedModels[array_search($oldName, $removedModels)]);
-                        unset($addedModels[array_search($newName, $addedModels)]);
+                        unset($removedModels[array_search($oldName, $removedModels, true)]);
+                        unset($addedModels[array_search($newName, $addedModels, true)]);
                         break;
                     }
                 }
@@ -69,34 +69,48 @@ class Autodetector
         }
 
         // 2. Detect Created Models
+        $createModelOps = [];
+        $fkOps = [];
+        
         foreach ($addedModels as $name) {
             $table = $newTables[$name];
             if (isset($table->options['proxy']) && $table->options['proxy'] === true) continue;
 
-            $operations[] = new CreateModel($name, $table->getColumns(), $table->options);
+            $createModelOps[$name] = new CreateModel($name, $table->getColumns(), $table->options);
 
             foreach ($table->getIndexes() as $index) {
-                $operations[] = new AddIndex($name, $index);
+                $fkOps[] = new AddIndex($name, $index);
             }
 
             foreach ($table->getConstraints() as $constraint) {
-                $operations[] = new AddConstraint($name, $constraint);
+                $fkOps[] = new AddConstraint($name, $constraint);
             }
             
             // Add Foreign Keys for the new model
             foreach ($table->getForeignKeys() as $fk) {
-                $operations[] = new AddForeignKey($name, $fk->name, $fk->column, $fk->toTable, $fk->toColumn, $fk->onDelete);
+                $fkOps[] = new AddForeignKey($name, $fk->name, $fk->column, $fk->toTable, $fk->toColumn, $fk->onDelete);
             }
 
             // Handle ManyToMany Junction Tables
             if (isset($table->options['m2m'])) {
                 foreach ($table->options['m2m'] as $fieldName => $m2m) {
-                    $operations = array_merge(
-                        $operations,
+                    $fkOps = array_merge(
+                        $fkOps,
                         $this->generateM2MJunction($name, $fieldName, $m2m, $table->options['app_label'] ?? null)
                     );
                 }
             }
+        }
+
+        // Create all tables first, then apply indexes/constraints/FKs. This avoids ordering issues
+        // when a table references another newly-created table in the same migration.
+        $orderedCreateModelOps = array_values($createModelOps);
+        
+        foreach ($orderedCreateModelOps as $op) {
+            $operations[] = $op;
+        }
+        foreach ($fkOps as $op) {
+            $operations[] = $op;
         }
 
         // 3. Detect Deleted Models
@@ -147,7 +161,7 @@ class Autodetector
                 // Always detect relation changes when no field changes
                 $preFieldOperations = array_merge(
                     $preFieldOperations,
-                    $this->detectRemovedAndChangedForeignKeys($name, $oldTable, $newTable),
+                    $this->detectRemovedAndChangedForeignKeys($name, $oldTable, $newTable, $modelRenamed ? $oldName : null),
                     $this->detectRemovedAndChangedConstraints($name, $oldTable, $newTable),
                     $this->detectRemovedAndChangedIndexes($name, $oldTable, $newTable)
                 );
@@ -165,7 +179,7 @@ class Autodetector
                     $postFieldOperations,
                     $this->detectAddedAndChangedIndexes($name, $oldTable, $newTable),
                     $this->detectAddedAndChangedConstraints($name, $oldTable, $newTable),
-                    $this->detectAddedAndChangedForeignKeys($name, $oldTable, $newTable)
+                    $this->detectAddedAndChangedForeignKeys($name, $oldTable, $newTable, $modelRenamed ? $oldName : null)
                 );
             } else {
                 // Field changes detected - keep original logic
@@ -202,7 +216,7 @@ class Autodetector
 
                 $preFieldOperations = array_merge(
                     $preFieldOperations,
-                    $this->detectRemovedAndChangedForeignKeys($name, $oldTable, $newTable),
+                    $this->detectRemovedAndChangedForeignKeys($name, $oldTable, $newTable, $modelRenamed ? $oldName : null),
                     $this->detectRemovedAndChangedConstraints($name, $oldTable, $newTable),
                     $this->detectRemovedAndChangedIndexes($name, $oldTable, $newTable)
                 );
@@ -227,7 +241,7 @@ class Autodetector
                     $postFieldOperations,
                     $this->detectAddedAndChangedIndexes($name, $oldTable, $newTable),
                     $this->detectAddedAndChangedConstraints($name, $oldTable, $newTable),
-                    $this->detectAddedAndChangedForeignKeys($name, $oldTable, $newTable)
+                    $this->detectAddedAndChangedForeignKeys($name, $oldTable, $newTable, $modelRenamed ? $oldName : null)
                 );
 
                 // (New M2M fields on existing models)
@@ -255,7 +269,39 @@ class Autodetector
             $operations = array_merge($operations, $preFieldOperations, $tableOperations, $postFieldOperations, $metadataOperations['post']);
         }
 
+        // 5. Django-style: handle db_table changes LAST (after rename detection is complete)
+        $operations = array_merge($operations, $this->generateAlteredDbTable());
+
         return $this->optimizer->optimize($operations);
+    }
+
+    /**
+     * Generate AlterModelTable operations for db_table option changes.
+     * Django-style: separate pass after all renames are handled.
+     */
+    private function generateAlteredDbTable(): array
+    {
+        $operations = [];
+        $oldTables = $this->fromState->getTables();
+        $newTables = $this->toState->getTables();
+
+        // Only process models that exist in both states (kept models)
+        foreach ($newTables as $name => $newTable) {
+            $oldTable = $oldTables[$name] ?? null;
+            if (!$oldTable) {
+                continue; // Skip newly created models
+            }
+
+            $oldDbTable = $oldTable->options['db_table'] ?? null;
+            $newDbTable = $newTable->options['db_table'] ?? null;
+
+            // Simple comparison - if db_table changed, generate AlterModelTable
+            if ($oldDbTable !== $newDbTable) {
+                $operations[] = new AlterModelTable($name, $newDbTable);
+            }
+        }
+
+        return $operations;
     }
 
     private function generateM2MJunction(string $modelName, string $fieldName, array $m2m, ?string $appLabel = null): array
@@ -294,10 +340,23 @@ class Autodetector
 
     private function isTableSimilar(\Nudelsalat\Schema\Table $old, \Nudelsalat\Schema\Table $new): bool
     {
-        $oldCols = array_map(fn(Column $column): string => $column->type . ':' . ($column->nullable ? '1' : '0'), $old->getColumns());
-        $newCols = array_map(fn(Column $column): string => $column->type . ':' . ($column->nullable ? '1' : '0'), $new->getColumns());
+        // If conceptual model name is the same (old->name === new->name), but db_table differs,
+        // Use case-insensitive comparison for model names
+        if (strtolower($old->name) === strtolower($new->name)) {
+            $oldDbTable = $old->options['db_table'] ?? null;
+            $newDbTable = $new->options['db_table'] ?? null;
+            if ($oldDbTable !== $newDbTable) {
+                // Same model name, different db_table - not a rename
+                return false;
+            }
+        }
 
-        if ($oldCols === [] || $newCols === []) {
+        // Django-style: use relation-agnostic field comparison
+        // Compare columns ignoring relation targets (FK, M2M)
+        $oldCols = $this->getRelationAgnosticColumns($old);
+        $newCols = $this->getRelationAgnosticColumns($new);
+
+        if (empty($oldCols) || empty($newCols)) {
             return false;
         }
 
@@ -305,6 +364,20 @@ class Autodetector
         $largest = max(count($oldCols), count($newCols));
 
         return $largest > 0 && ($overlap / $largest) >= 0.7;
+    }
+
+    /**
+     * Get columns for comparison ignoring relation targets.
+     * This follows Django's only_relation_agnostic_fields() approach.
+     */
+    private function getRelationAgnosticColumns(\Nudelsalat\Schema\Table $table): array
+    {
+        $cols = [];
+        foreach ($table->getColumns() as $column) {
+            // Compare by type and nullability only (ignore relation info)
+            $cols[] = $column->type . ':' . ($column->nullable ? '1' : '0');
+        }
+        return $cols;
     }
 
     private function isColumnRenameCandidate(Column $old, Column $new): bool
@@ -326,7 +399,7 @@ class Autodetector
             && $old->options == $new->options;
     }
 
-    private function detectRemovedAndChangedForeignKeys(string $tableName, \Nudelsalat\Schema\Table $oldTable, \Nudelsalat\Schema\Table $newTable): array
+    private function detectRemovedAndChangedForeignKeys(string $tableName, \Nudelsalat\Schema\Table $oldTable, \Nudelsalat\Schema\Table $newTable, string $oldName = null): array
     {
         $operations = [];
         $oldForeignKeys = $oldTable->getForeignKeys();
@@ -346,12 +419,25 @@ class Autodetector
         return $operations;
     }
 
-    private function detectAddedAndChangedForeignKeys(string $tableName, \Nudelsalat\Schema\Table $oldTable, \Nudelsalat\Schema\Table $newTable): array
+    private function detectAddedAndChangedForeignKeys(string $tableName, \Nudelsalat\Schema\Table $oldTable, \Nudelsalat\Schema\Table $newTable, string $oldName = null): array
     {
         $operations = [];
         $oldForeignKeys = $oldTable->getForeignKeys();
 
+        // If model was renamed, compute old FK name pattern to check if only name changed
+        $oldTableName = $oldName ?? $tableName;
+        
         foreach ($newTable->getForeignKeys() as $name => $newForeignKey) {
+            // Check if this is a name-only change due to model rename
+            // Old naming pattern: fk_{oldModelName}_{column}
+            // New naming pattern: fk_{newModelName}_{column}
+            $oldFkName = 'fk_' . $oldTableName . '_' . $newForeignKey->column;
+            
+            // If only the FK name changed (due to model rename), skip
+            if (isset($oldForeignKeys[$oldFkName]) && $this->isStructurallyEqual($oldForeignKeys[$oldFkName], $newForeignKey)) {
+                continue;
+            }
+            
             if (!isset($oldForeignKeys[$name]) || !$this->isStructurallyEqual($oldForeignKeys[$name], $newForeignKey)) {
                 $operations[] = new AddForeignKey(
                     $tableName,
@@ -449,10 +535,9 @@ class Autodetector
         $oldDbTable = $oldOptions['db_table'] ?? null;
         $newDbTable = $newOptions['db_table'] ?? null;
         
-        // Skip db_table change if model was renamed (RenameModel handles it)
-        if ($oldDbTable !== $newDbTable && !$modelRenamed) {
-            $pre[] = new AlterModelTable($tableName, $newDbTable);
-        }
+        // Handle db_table change: Django-style separate pass after renames
+        // We'll handle this in a separate method called after rename detection
+        // Skip here - will be handled by generateAlteredDbTable()
 
         $oldComment = $oldOptions['db_table_comment'] ?? null;
         $newComment = $newOptions['db_table_comment'] ?? null;
@@ -519,4 +604,5 @@ class Autodetector
 
         return $filtered;
     }
+
 }

@@ -4,6 +4,65 @@ namespace Nudelsalat\Schema;
 
 class PostgreSQLSchemaEditor extends SchemaEditor
 {
+    public function tableExists(string $tableName): bool
+    {
+        if ($this->tableCache === null) {
+            $this->tableCache = [];
+            try {
+                $stmt = $this->pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
+                while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                    $this->tableCache[$row['table_name']] = true;
+                }
+            } catch (\PDOException $e) {
+                // Fallback: just use a simple query
+                $this->tableCache = [];
+            }
+        }
+        return isset($this->tableCache[$tableName]);
+    }
+
+    public function columnExists(string $tableName, string $columnName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ? AND column_name = ?");
+            $stmt->execute([$tableName, $columnName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return true; // On error, assume it exists to be safe
+        }
+    }
+
+    public function indexExists(string $tableName, string $indexName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = ? AND indexname = ?");
+            $stmt->execute([$tableName, $indexName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return true; // On error, assume it exists to be safe
+        }
+    }
+
+    public function foreignKeyExists(string $tableName, string $constraintName): bool
+    {
+        if (!$this->tableExists($tableName)) {
+            return false;
+        }
+        try {
+            $stmt = $this->pdo->prepare("SELECT 1 FROM information_schema.table_constraints WHERE table_schema = 'public' AND table_name = ? AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'");
+            $stmt->execute([$tableName, $constraintName]);
+            return (bool)$stmt->fetch();
+        } catch (\PDOException $e) {
+            return true; // On error, assume it exists to be safe
+        }
+    }
+
     protected function quoteTableName(string $name): string
     {
         if (str_contains($name, '.')) {
@@ -13,7 +72,7 @@ class PostgreSQLSchemaEditor extends SchemaEditor
         return '"' . $name . '"';
     }
 
-    public function createTable(Table $table): void
+    public function createTable(Table $table, ?string $dbName = null): void
     {
         $columnDefs = [];
         foreach ($table->getColumns() as $column) {
@@ -22,7 +81,7 @@ class PostgreSQLSchemaEditor extends SchemaEditor
 
         $sql = sprintf(
             "CREATE TABLE %s (%s)",
-            $this->quoteTableName($table->name),
+            $this->quoteTableName($dbName ?? $table->name),
             implode(', ', $columnDefs)
         );
 
@@ -31,14 +90,24 @@ class PostgreSQLSchemaEditor extends SchemaEditor
 
     public function deleteTable(string $name): void
     {
-        $sql = sprintf("DROP TABLE %s CASCADE", $this->quoteTableName($name));
-        $this->execute($sql);
+        if ($this->tableExists($name)) {
+            $sql = sprintf("DROP TABLE %s CASCADE", $this->quoteTableName($name));
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function renameTable(string $oldName, string $newName): void
     {
-        $sql = sprintf("ALTER TABLE %s RENAME TO %s", $this->quoteTableName($oldName), $this->quoteTableName($newName));
-        $this->execute($sql);
+        if ($oldName === $newName) {
+            return;
+        }
+
+        if ($this->tableExists($oldName)) {
+            $sql = sprintf("ALTER TABLE %s RENAME TO %s", $this->quoteTableName($oldName), $this->quoteTableName($newName));
+            $this->execute($sql);
+            $this->clearTableCache();
+        }
     }
 
     public function addColumn(string $tableName, Column $column): void
@@ -140,17 +209,17 @@ class PostgreSQLSchemaEditor extends SchemaEditor
         $this->execute($sql);
     }
 
-    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete): void
+    public function addForeignKey(string $tableName, string $columnName, string $toTable, string $toColumn, string $onDelete, ?string $fkName = null): void
     {
-        $fkName = "fk_{$tableName}_{$columnName}";
-        if (str_contains($fkName, '.')) {
-             $fkName = str_replace('.', '_', $fkName);
+        $constraintName = $fkName ?? "fk_{$tableName}_{$columnName}";
+        if (str_contains($constraintName, '.')) {
+             $constraintName = str_replace('.', '_', $constraintName);
         }
 
         $sql = sprintf(
             "ALTER TABLE %s ADD CONSTRAINT \"%s\" FOREIGN KEY (\"%s\") REFERENCES %s (\"%s\") ON DELETE %s",
             $this->quoteTableName($tableName),
-            $fkName,
+            $constraintName,
             $columnName,
             $this->quoteTableName($toTable),
             $toColumn,

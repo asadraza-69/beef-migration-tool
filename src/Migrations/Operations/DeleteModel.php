@@ -19,12 +19,18 @@ class DeleteModel extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->deleteTable($this->name);
+        if ($schemaEditor->tableExists($this->name)) {
+            $schemaEditor->deleteTable($this->name);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->createTable($fromState->getTable($this->name));
+        $table = $fromState->getTable($this->name);
+        if ($table && !$schemaEditor->tableExists($this->name)) {
+            $dbName = $table->options['db_table'] ?? $this->name;
+            $schemaEditor->createTable($table, $dbName);
+        }
     }
 
     public function describe(): string

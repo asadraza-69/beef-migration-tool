@@ -23,14 +23,20 @@ class RemoveConstraint extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeConstraint($this->modelName, $this->name);
+        if ($schemaEditor->tableExists($this->modelName)) {
+            $schemaEditor->removeConstraint($this->modelName, $this->name);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $oldTable = $fromState->getTable($this->modelName);
-        $constraint = $oldTable->getConstraints()[$this->name];
-        $schemaEditor->addConstraint($this->modelName, $constraint);
+        if ($schemaEditor->tableExists($this->modelName)) {
+            $oldTable = $fromState->getTable($this->modelName);
+            $constraint = $oldTable->getConstraints()[$this->name] ?? null;
+            if ($constraint) {
+                $schemaEditor->addConstraint($this->modelName, $constraint);
+            }
+        }
     }
 
     public function describe(): string

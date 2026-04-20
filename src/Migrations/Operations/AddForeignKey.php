@@ -34,12 +34,16 @@ class AddForeignKey extends Operation
 
     public function databaseForwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->addForeignKey($this->modelName, $this->column, $this->toModel, $this->toColumn, $this->onDelete);
+        if ($schemaEditor->tableExists($this->modelName) && !$schemaEditor->foreignKeyExists($this->modelName, $this->name)) {
+            $schemaEditor->addForeignKey($this->modelName, $this->column, $this->toModel, $this->toColumn, $this->onDelete, $this->name);
+        }
     }
 
     public function databaseBackwards(SchemaEditor $schemaEditor, ProjectState $fromState, ProjectState $toState, StateRegistry $registry): void
     {
-        $schemaEditor->removeForeignKey($this->modelName, $this->name);
+        if ($schemaEditor->tableExists($this->modelName) && $schemaEditor->foreignKeyExists($this->modelName, $this->name)) {
+            $schemaEditor->removeForeignKey($this->modelName, $this->name);
+        }
     }
 
     public function describe(): string
