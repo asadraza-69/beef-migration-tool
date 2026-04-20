@@ -735,7 +735,7 @@ class Manager
 
         foreach ($conditions as $field => $value) {
             if (is_array($value)) {
-                $placeholders = implode(',', array_fill(0, count($value), '?'));
+                $placeholders = implode(',', array_fill(0, \count($value), '?'));
                 $where[] = "{$field} IN ({$placeholders})";
                 $values = array_merge($values, $value);
             } else {
@@ -787,7 +787,7 @@ class Manager
         }
 
         $fields = array_keys($data);
-        $placeholders = array_fill(0, count($data), '?');
+        $placeholders = array_fill(0, \count($data), '?');
 
         Signal::send('pre_save', [$this->model, $data, false]);
 
@@ -962,7 +962,7 @@ class Manager
 
         if ($batch) {
             $fields = array_keys($records[0]);
-            $placeholders = implode(',', array_fill(0, count($fields), '?'));
+            $placeholders = implode(',', array_fill(0, \count($fields), '?'));
 
             $sql = sprintf(
                 "INSERT INTO %s (%s) VALUES (%s)",

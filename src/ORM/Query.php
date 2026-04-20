@@ -130,6 +130,14 @@ class Paginator
 
     public function __construct(array $items, int $perPage = 10, int $currentPage = 1)
     {
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('perPage must be >= 1');
+        }
+
+        if ($currentPage < 1) {
+            throw new \InvalidArgumentException('currentPage must be >= 1');
+        }
+
         $this->items = $items;
         $this->perPage = $perPage;
         $this->currentPage = $currentPage;
@@ -137,18 +145,52 @@ class Paginator
 
     public function getTotalPages(): int
     {
-        return (int) ceil(count($this->items) / $this->perPage);
+        // Django behavior: allow an empty first page by default.
+        $totalItems = \count($this->items);
+        if ($totalItems === 0) {
+            return 1;
+        }
+
+        return (int) \ceil($totalItems / $this->perPage);
     }
 
     public function getPage(int $pageNumber): array
     {
         $offset = ($pageNumber - 1) * $this->perPage;
-        return array_slice($this->items, $offset, $this->perPage);
+        return \array_slice($this->items, $offset, $this->perPage);
+    }
+
+    /**
+     * Return the items for the current page (Django-like API).
+     */
+    public function items(): array
+    {
+        return $this->getPage($this->currentPage);
+    }
+
+    public function currentPage(): int
+    {
+        return $this->currentPage;
+    }
+
+    public function totalPages(): int
+    {
+        return $this->getTotalPages();
+    }
+
+    public function totalItems(): int
+    {
+        return $this->getTotalCount();
     }
 
     public function hasNextPage(): bool
     {
         return $this->currentPage < $this->getTotalPages();
+    }
+
+    public function hasPrevPage(): bool
+    {
+        return $this->hasPreviousPage();
     }
 
     public function hasPreviousPage(): bool
@@ -158,7 +200,8 @@ class Paginator
 
     public function getTotalCount(): int
     {
-        return sizeof($this->items);
+        // Explicit global call: Count() aggregate helper is also in this namespace.
+        return \count($this->items);
     }
 }
 

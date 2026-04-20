@@ -289,7 +289,7 @@ class QuerySet
                 return '0=1';
             }
 
-            $placeholders = implode(',', array_fill(0, count($value), '?'));
+            $placeholders = implode(',', array_fill(0, \count($value), '?'));
             $values = array_merge($values, array_values($value));
             return "{$field} IN ({$placeholders})";
         }
@@ -352,7 +352,7 @@ class QuerySet
      */
     public function count(): int
     {
-        return count($this->execute());
+        return \count($this->execute());
     }
 
     /**
