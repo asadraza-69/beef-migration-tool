@@ -16,6 +16,8 @@ class QuerySet
     private \PDO $pdo;
     private array $conditions = [];
     private array $orConditions = [];
+    /** @var array<int, array<string, mixed>> */
+    private array $excludeConditions = [];
     private ?string $orderBy = null;
     private ?int $limit = null;
     private ?int $offset = null;
@@ -105,6 +107,19 @@ class QuerySet
     }
 
     /**
+     * Exclude rows matching the given conditions (Django-style).
+     *
+     * Each call to exclude() adds a separate negated group:
+     * - exclude(['a' => 1, 'b' => 2]) => NOT (a=1 AND b=2)
+     * - exclude(['a' => 1])->exclude(['b' => 2]) => NOT (a=1) AND NOT (b=2)
+     */
+    public function exclude(array $conditions): self
+    {
+        $this->excludeConditions[] = $conditions;
+        return $this;
+    }
+
+    /**
      * Add OR condition.
      * 
      * @param array $conditions
@@ -122,8 +137,16 @@ class QuerySet
      * @param string $field Field name (prefix with - for DESC)
      * @return self
      */
-    public function orderBy(string $field): self
+    public function orderBy(string $field, ?string $direction = null): self
     {
+        if ($direction !== null) {
+            $dir = strtoupper(trim($direction));
+            if ($dir === 'DESC') {
+                $field = '-' . ltrim($field, '-');
+            } elseif ($dir === 'ASC') {
+                $field = ltrim($field, '-');
+            }
+        }
         $this->orderBy = $field;
         return $this;
     }
@@ -219,13 +242,16 @@ class QuerySet
         $values = [];
         
         foreach ($this->conditions as $field => $value) {
-            if (is_array($value)) {
-                $placeholders = implode(',', array_fill(0, count($value), '?'));
-                $where[] = "{$field} IN ({$placeholders})";
-                $values = array_merge($values, $value);
-            } else {
-                $where[] = "{$field} = ?";
-                $values[] = $value;
+            $where[] = $this->compileCondition($field, $value, $values);
+        }
+
+        foreach ($this->excludeConditions as $excludeGroup) {
+            $parts = [];
+            foreach ($excludeGroup as $field => $value) {
+                $parts[] = $this->compileCondition($field, $value, $values);
+            }
+            if ($parts !== []) {
+                $where[] = 'NOT (' . implode(' AND ', $parts) . ')';
             }
         }
         
@@ -234,8 +260,7 @@ class QuerySet
             foreach ($this->orConditions as $orCond) {
                 $orFields = [];
                 foreach ($orCond as $field => $value) {
-                    $orFields[] = "{$field} = ?";
-                    $values[] = $value;
+                    $orFields[] = $this->compileCondition($field, $value, $values);
                 }
                 $orParts[] = '(' . implode(' OR ', $orFields) . ')';
             }
@@ -250,6 +275,27 @@ class QuerySet
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($values);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function compileCondition(string $field, mixed $value, array &$values): string
+    {
+        if ($value === null) {
+            return "{$field} IS NULL";
+        }
+
+        if (is_array($value)) {
+            if ($value === []) {
+                // IN () is invalid SQL; Django treats __in=[] as an empty result set.
+                return '0=1';
+            }
+
+            $placeholders = implode(',', array_fill(0, count($value), '?'));
+            $values = array_merge($values, array_values($value));
+            return "{$field} IN ({$placeholders})";
+        }
+
+        $values[] = $value;
+        return "{$field} = ?";
     }
 
     /**
